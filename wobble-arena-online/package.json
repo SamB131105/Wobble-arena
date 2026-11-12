@@ -1,0 +1,8 @@
+{
+  "name": "wobble-arena-online",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Keyboard reaction party games for 2 to 6 friends",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
