@@ -1,6 +1,6 @@
 'use strict';
 /* =====================================================================
-   WOBBLE ARENA ONLINE - game server
+   QUICK SIX - game server
    Needs only Node.js (no extra packages).   Run:  node server.js
    Then open http://localhost:3000 in a browser.
 
@@ -120,9 +120,9 @@ function cleanAv(a){
 function newCode(){for(;;){let c='';for(let i=0;i<4;i++)c+=pick('ABCDEFGHJKLMNPQRSTUVWXYZ');if(!rooms.has(c))return c;}}
 function lagCredit(p){return p.rtts.length?Math.min(Math.min.apply(null,p.rtts),MAX_LAG_CREDIT):0;}
 function roomState(r){
-  const players=r.players.map(p=>({id:p.id,name:p.name,av:p.av,wins:p.wins,r:p.card.r,ping:p.rtts.length?Math.round(Math.min.apply(null,p.rtts)):null}));
+  const players=r.players.map(p=>({id:p.id,name:p.name,av:p.av,wins:p.wins,r:p.card.r,bot:!!p.bot,lv:p.bot?p.lv:null,ping:p.rtts.length?Math.round(Math.min.apply(null,p.rtts)):null}));
   const startIn=r.startAt?Math.max(0,Math.round(r.startAt-now())):null;
-  for(const p of r.players)p.conn.send({t:'room',code:r.code,you:p.id,host:r.host.id,players:players,playing:!!r.game||!!r.party,pub:r.pub||null,startIn:startIn});
+  for(const p of r.players)p.conn.send({t:'room',code:r.code,you:p.id,host:r.host.id,players:players,playing:!!r.game||!!r.party,pub:r.pub||null,solo:!!r.solo,startIn:startIn});
 }
 function addPlayer(conn,r,m){
   const p={id:nextId++,conn:conn,name:cleanName(m.name),av:cleanAv(m.av),room:r,wins:0,rtts:[],pings:new Map(),lastPong:now(),card:readCard(m.tok),lastEmote:0};
@@ -133,10 +133,26 @@ function leave(conn){
   r.players=r.players.filter(x=>x!==p);
   if(r.game)r.game.drop(p);
   if(r.party)r.party.drop(p);
-  if(!r.players.length){clearTimeout(r.timer);rooms.delete(r.code);return;}
+  if(!r.players.some(x=>!x.bot)){clearTimeout(r.timer);rooms.delete(r.code);if(r.game)r.game.stop();if(r.party)r.party.end(false);return;}
   if(r.host===p)r.host=r.players[0];
   refresh(r);
 }
+/* ---------------- solo bots ----------------
+   Bots are pretend players that live on the server. Their strength d grows with
+   the level the player has reached: quicker reactions, fewer mistakes, faster mashing. */
+const BOT_NAMES=['Ziggy','Nova','Bram','Pip','Juno','Rocco','Mabel','Kai','Lumi','Otto','Fern','Dex','Wren','Tilly','Gus','Indy','Remy','Suki','Hugo','Nell'];
+const B_SKIN=['#f8d5b8','#efc29a','#d9a273','#b97b4f','#8d5a3b','#5e3b26'],B_HAIR=['#2b1d14','#5a3a1e','#a5642a','#e2b65c','#d94f2b','#e8e8e8','#3b5bd9','#c2409a'],B_SHIRT=['#e63946','#f4a261','#2a9d8f','#457b9d','#8e44ad','#2ecc71','#f1c40f','#34495e','#ff6fae','#f5f5f5'];
+const DIRN=['up','right','down','left'];
+function addBot(r){
+  const name=pick(BOT_NAMES.filter(n=>!r.players.some(p=>p.name===n)));
+  r.players.push({id:nextId++,conn:{send(){},kill(){}},name:name,av:{skin:pick(B_SKIN),hairC:pick(B_HAIR),shirt:pick(B_SHIRT),hair:Math.floor(Math.random()*6),eyes:Math.floor(Math.random()*4),name:name},
+    room:r,wins:0,rtts:[],pings:new Map(),lastPong:Infinity,card:{u:'bot'+nextId,r:1000,g:0,w:0},lastEmote:0,bot:true,lv:1,d:0.5});
+}
+function setBots(r,lv){lv=Math.max(1,Math.min(9999,Math.floor(Number(lv))||1));for(const p of r.players)if(p.bot){p.lv=lv;p.d=(0.5+0.05*(lv-1))*rand(0.95,1.05);}}
+const bRT=d=>Math.max(105,520-260*d)*rand(0.85,1.2);            /* simple reaction, ms */
+const bCRT=d=>Math.max(140,900-480*d)*rand(0.8,1.25);           /* reaction with a choice, ms */
+const bAcc=d=>Math.min(0.99,0.6+0.3*d);                         /* chance of choosing correctly */
+
 /* ---------------- public matchmaking ---------------- */
 function findPublic(mode,card){
   let best=null;
@@ -178,6 +194,8 @@ class Game{
   /* one round deadline at a time: starting a new one, or resolving early, cancels the old one */
   deadline(ms,fn){clearTimeout(this._dl);this._dl=this.after(ms,fn);}
   clearDeadline(){clearTimeout(this._dl);}
+  bots(fn){for(const p of this.players)if(p.bot)fn(p,p.d);}
+  botKey(p,k,ms){this.after(ms,()=>{if(this.players.indexOf(p)>=0)this.key(p,k,now());});}
   every(ms,fn){const h=setInterval(()=>{if(!this.over)fn();},ms);this.timers.push(h);}
   send(o){o.t='g';o.g=this.name;for(const p of this.players)p.conn.send(o);}
   scores(){const o={};for(const [p,v] of this.sc)o[p.id]=v;return o;}
@@ -205,9 +223,9 @@ class QuickDraw extends Game{
     for(let i=0;i<2;i++){
       if(Math.random()>0.45)continue;const at=rand(600,wait-700);
       if(at<500||used.some(u=>Math.abs(u-at)<650))continue;used.push(at);const word=pick(FAKES);
-      this.after(at,()=>{if(this.phase==='wait')this.send({ev:'fake',word:word});});
+      this.after(at,()=>{if(this.phase!=='wait')return;this.send({ev:'fake',word:word});this.bots((b,d)=>{if(Math.random()<Math.max(0,0.25-0.2*d))this.botKey(b,'fire',260);});});
     }
-    this.after(wait,()=>{if(this.phase!=='wait')return;this.phase='draw';this.at=now();this.send({ev:'draw'});this.deadline(1600,()=>this.resolve());});
+    this.after(wait,()=>{if(this.phase!=='wait')return;this.phase='draw';this.at=now();this.send({ev:'draw'});this.bots((b,d)=>this.botKey(b,'fire',bRT(d)));this.deadline(1600,()=>this.resolve());});
   }
   allIn(){return this.players.every(p=>this.fouls.has(p)||this.shots.has(p));}
   key(p,k,t){
@@ -246,6 +264,7 @@ class FlySwat extends Game{
   add(s,k,prog){
     const D=Math.round((1150-420*prog)*rand(0.9,1.15)),b={id:this.nextBug++,s:s,k:k,at:now(),D:D,claims:[],dead:false};
     this.bugs.push(b);this.send({ev:'bug',id:b.id,s:s,k:k,D:D});
+    this.bots((bt,d)=>{const rt=bCRT(d);if(rt<D&&Math.random()<(k==='fly'?bAcc(d):Math.max(0.02,0.3-0.25*d)))this.botKey(bt,DIRN[s],rt);});
     this.after(D+MAX_LAG_CREDIT,()=>{if(!b.dead&&!b.claims.length){b.dead=true;this.send({ev:'gone',id:b.id});}this.bugs=this.bugs.filter(x=>!x.dead);});
     this.after(D,()=>{if(!b.dead)this.send({ev:'gone',id:b.id,soft:true});});
   }
@@ -272,7 +291,7 @@ class Keeper extends Game{
     this.n++;this.phase='run';this.dives=new Map();this.send({ev:'run',n:this.n,total:this.total});
     const wait=rand(1700,3600);
     if(Math.random()<0.6){const at=rand(500,wait-700);this.after(at,()=>{if(this.phase==='run')this.send({ev:'stutter'});});}
-    this.after(wait,()=>{this.phase='shot';this.dir=pick([-1,0,1]);this.F=Math.round(640-32*this.n);this.at=now();this.send({ev:'kick',dir:this.dir,F:this.F});this.deadline(this.F+MAX_LAG_CREDIT+60,()=>this.resolve());});
+    this.after(wait,()=>{this.phase='shot';this.dir=pick([-1,0,1]);this.F=Math.round(640-32*this.n);this.at=now();this.send({ev:'kick',dir:this.dir,F:this.F});this.bots((b,d)=>{const dr=Math.random()<bAcc(d)?this.dir:pick([-1,0,1]);this.botKey(b,dr<0?'left':dr>0?'right':'up',bCRT(d)*0.8);});this.deadline(this.F+MAX_LAG_CREDIT+60,()=>this.resolve());});
   }
   key(p,k,t){
     const d=KDIR[k];if(d===undefined||this.dives.has(p))return;
@@ -294,7 +313,8 @@ class Keeper extends Game{
 
 class MashDash extends Game{
   start(){this.len=this.LEN||100;this.st=new Map(this.players.map(p=>[p,{x:0,last:'',lt:0,fin:null}]));this.send({ev:'intro',len:this.len});
-    this.after(3500,()=>{this.t0=now();this.send({ev:'go'});if(this.onGo)this.onGo();this.every(70,()=>this.tick());this.after(45000,()=>this.end());});}
+    this.after(3500,()=>{this.t0=now();this.send({ev:'go'});if(this.onGo)this.onGo();this.every(50,()=>this.botTap());this.every(70,()=>this.tick());this.after(45000,()=>this.end());});}
+  botTap(){this.bots((b,d)=>{if(this.red)return;b.acc=(b.acc||0)+Math.min(21,4+5*d)*0.05*rand(0.8,1.2);if(b.acc>=1){b.acc-=1;b.k=b.k==='z'?'x':'z';this.key(b,b.k,now());}});}
   tick(){const pos={};for(const [p,s] of this.st)pos[p.id]=s.x;this.send({ev:'pos',pos:pos});}
   key(p,k,t){
     const s=this.st.get(p);if(!s||this.t0===undefined||s.fin!==null||(k!=='z'&&k!=='x'))return;
@@ -317,7 +337,9 @@ class MashDash extends Game{
 }
 class RedLight extends MashDash{
   onGo(){this.red=false;this.redAt=0;this.flip();}
-  flip(){this.after(this.red?rand(1200,2600):rand(1400,4200),()=>{this.red=!this.red;this.redAt=now();this.send({ev:'light',red:this.red});this.flip();});}
+  flip(){this.after(this.red?rand(1200,2600):rand(1400,4200),()=>{this.red=!this.red;this.redAt=now();this.send({ev:'light',red:this.red});
+    if(this.red)this.bots((b,d)=>{if(Math.random()<Math.max(0.03,0.45-0.35*d))this.botKey(b,b.k==='z'?'x':'z',420);});
+    this.flip();});}
   key(p,k,t){
     if(this.red){
       const s=this.st.get(p);if(!s||s.fin!==null||(k!=='z'&&k!=='x'))return;
@@ -336,6 +358,7 @@ class HotPotato extends Game{
     this.holder=p;this.dir=Math.floor(Math.random()*4);this.holdAt=now();this.lock=0;
     if(fresh)this.after(rand(6000,14000),()=>this.explode());
     this.send({ev:'hold',id:p.id,dir:this.dir});
+    if(p.bot)this.botKey(p,DIRN[this.dir],bCRT(p.d));
   }
   key(p,k,t){
     if(p!==this.holder||SDIR[k]===undefined||t<this.lock||t-this.holdAt-lagCredit(p)<MIN_REACTION)return;
@@ -344,7 +367,7 @@ class HotPotato extends Game{
   }
   explode(){
     const p=this.holder;if(!p)return;this.holder=null;this.alive=this.alive.filter(x=>x!==p);this.out.push(p);this.send({ev:'boom',id:p.id});
-    this.after(2600,()=>{if(this.alive.length<=1)this.done();else this.give(pick(this.alive),true);});
+    this.after(2600,()=>{if(this.alive.length<=1||(this.room.solo&&!this.alive.some(x=>!x.bot)))this.done();else this.give(pick(this.alive),true);});
   }
   onDrop(p){
     this.alive=this.alive.filter(x=>x!==p);this.out=this.out.filter(x=>x!==p);
@@ -364,7 +387,9 @@ class CopyCat extends Game{
     this.len++;this.phase='show';this.seq=[];for(let i=0;i<this.len;i++)this.seq.push(Math.floor(Math.random()*4));
     this.idx=new Map(this.alive.map(p=>[p,0]));this.state=new Map();
     this.send({ev:'show',seq:this.seq,alive:this.alive.map(p=>p.id)});
-    this.after(this.len*600+900,()=>{this.phase='input';this.send({ev:'input'});this.deadline(this.len*1100+2500,()=>this.endRound());});
+    this.after(this.len*600+900,()=>{this.phase='input';this.send({ev:'input'});
+      this.bots((b,d)=>{if(!this.idx.has(b))return;const pe=Math.max(0.005,0.12-0.09*d);for(let i=0;i<this.len;i++)this.botKey(b,DIRN[Math.random()<pe?(this.seq[i]+1)%4:this.seq[i]],500+i*380);});
+      this.deadline(this.len*1100+2500,()=>this.endRound());});
   }
   key(p,k){
     const d=SDIR[k];if(this.phase!=='input'||d===undefined||!this.idx.has(p)||this.state.has(p))return;
@@ -377,7 +402,7 @@ class CopyCat extends Game{
     if(this.phase!=='input')return;this.phase='res';this.clearDeadline();
     const ok=this.alive.filter(p=>this.state.get(p)==='done'),out=this.alive.filter(p=>ok.indexOf(p)<0);
     this.send({ev:'rres',out:out.map(p=>p.id)});
-    const end=!ok.length||this.len>=10||(ok.length===1&&this.players.length>1);this.alive=ok;
+    const end=!ok.length||this.len>=10||(ok.length===1&&this.players.length>1)||(this.room.solo&&!ok.some(x=>!x.bot));this.alive=ok;
     this.after(2400,()=>{
       if(!end){this.round();return;}
       this.finish(this.players.slice().sort((a,b)=>this.best.get(b)-this.best.get(a)).map(p=>({p:p,score:this.best.get(p),note:this.best.get(p)+' arrows'})));
@@ -392,7 +417,9 @@ class WordDash extends Game{
   next(){
     this.n++;do{this.word=pick(WORDS);}while(this.used.has(this.word));this.used.add(this.word);
     this.idx=new Map(this.players.map(p=>[p,0]));this.fin=new Map();this.phase='type';this.at=now();
-    this.send({ev:'word',w:this.word,n:this.n,total:this.total});this.deadline(9000,()=>this.endWord());
+    this.send({ev:'word',w:this.word,n:this.n,total:this.total});
+    this.bots((b,d)=>{let tt=350;for(let i=0;i<this.word.length;i++){tt+=1000/(2+4*d)*rand(0.7,1.3)+(Math.random()<0.05/d?600:0);this.botKey(b,'l'+this.word[i],tt);}});
+    this.deadline(9000,()=>this.endWord());
   }
   key(p,k,t){
     if(this.phase!=='type'||k.length!==2||k[0]!=='l'||this.fin.has(p)||!this.idx.has(p))return;
@@ -422,7 +449,7 @@ class LastSeat extends Game{
     this.r++;this.phase='music';this.early=new Set();this.sat=new Map();this.send({ev:'music',alive:this.alive.map(p=>p.id),round:this.r});
     const wait=rand(2500,7000);
     if(Math.random()<0.5){const at=rand(800,wait-900);if(at>600)this.after(at,()=>{if(this.phase==='music')this.send({ev:'skip'});});}
-    this.after(wait,()=>{if(this.phase!=='music')return;this.phase='sit';this.at=now();this.send({ev:'stop'});this.deadline(1800,()=>this.resolve());});
+    this.after(wait,()=>{if(this.phase!=='music')return;this.phase='sit';this.at=now();this.send({ev:'stop'});this.bots((b,d)=>{if(this.alive.indexOf(b)>=0)this.botKey(b,'fire',bRT(d));});this.deadline(1800,()=>this.resolve());});
   }
   key(p,k,t){
     if(k!=='fire'||this.alive.indexOf(p)<0||this.early.has(p)||this.sat.has(p))return;
@@ -441,7 +468,7 @@ class LastSeat extends Game{
     this.alive=this.alive.filter(p=>out.indexOf(p)<0);for(const p of out)this.out.push({p:p,r:this.r});
     const times={};for(const [p,rt] of this.sat)times[p.id]=Math.round(rt);
     this.send({ev:'res',out:out.map(p=>p.id),times:times,alive:this.alive.map(p=>p.id)});
-    this.after(2800,()=>{if(this.alive.length<=1||this.r>=15)this.done();else this.music();});
+    this.after(2800,()=>{if(this.alive.length<=1||this.r>=15||(this.room.solo&&!this.alive.some(x=>!x.bot)))this.done();else this.music();});
   }
   onDrop(p){this.alive=this.alive.filter(x=>x!==p);this.out=this.out.filter(o=>o.p!==p);if(this.alive.length<=1)this.done();}
   done(){
@@ -456,7 +483,7 @@ class StopClock extends Game{
   next(){
     this.n++;this.target=Math.round(rand(30,70))*100;this.press=new Map();this.phase='ready';
     this.send({ev:'clock',target:this.target,n:this.n,total:this.total});
-    this.after(1800,()=>{this.phase='run';this.at=now();this.send({ev:'run'});this.deadline(this.target+3000,()=>this.resolve());});
+    this.after(1800,()=>{this.phase='run';this.at=now();this.send({ev:'run'});this.bots((b,d)=>this.botKey(b,'fire',Math.max(320,this.target+(Math.random()+Math.random()+Math.random()-1.5)*1.4*Math.max(20,600-380*d))));this.deadline(this.target+3000,()=>this.resolve());});
   }
   key(p,k,t){
     if(k!=='fire'||this.phase!=='run'||this.press.has(p)||!this.err.has(p))return;
@@ -480,7 +507,7 @@ class StopClock extends Game{
 class Choice extends Game{
   start(){this.n=0;this.total=8;this.send({ev:'intro',kind:this.kind});this.after(3500,()=>this.wait());}
   wait(){this.phase='wait';this.send({ev:'ready'});this.after(rand(900,2300),()=>this.ask());}
-  ask(){this.n++;const q=this.gen();this.ans=q.ans;this.answers=new Map();this.phase='ask';this.at=now();this.send({ev:'q',n:this.n,total:this.total,q:q.show});this.deadline(4000,()=>this.resolve());}
+  ask(){this.n++;const q=this.gen();this.ans=q.ans;this.answers=new Map();this.phase='ask';this.at=now();this.send({ev:'q',n:this.n,total:this.total,q:q.show});this.bots((b,d)=>this.botKey(b,DIRN[Math.random()<bAcc(d)?this.ans:(this.ans+1+Math.floor(Math.random()*3))%4],bCRT(d)));this.deadline(4000,()=>this.resolve());}
   key(p,k,t){
     const d=SDIR[k];if(this.phase!=='ask'||d===undefined||this.answers.has(p)||!this.sc.has(p))return;
     const rt=t-this.at-lagCredit(p);this.answers.set(p,{d:d,rt:rt,ok:d===this.ans&&rt>=MIN_REACTION});this.send({ev:'ansd',id:p.id});
@@ -527,6 +554,7 @@ class Party{
   constructor(room,rounds){
     this.room=room;this.rounds=rounds;this.n=0;this.players=room.players.slice();this.total=new Map(this.players.map(p=>[p,0]));
     this.hand=new Map();this.plays=new Map();this.bag=[];this.lastGame=null;this.phase='pick';
+    for(const p of this.players)if(p.bot)this.hand.set(p,new Set(shuffle(CARDS).slice(0,2)));
     this.send({ev:'pick',rounds:rounds});this.timer=setTimeout(()=>this.beginRound(),25000);
   }
   send(o,only){o.t='party';for(const p of(only?[only]:this.players))p.conn.send(o);}
@@ -542,6 +570,10 @@ class Party{
     this.n++;this.phase='cards';this.plays=new Map();const t=this.totals();
     for(const p of this.players)this.send({ev:'round',n:this.n,of:this.rounds,totals:t,hand:[...this.hand.get(p)]},p);
     this.timer=setTimeout(()=>this.startGame(),12000);
+    for(const p of this.players.filter(x=>x.bot)){
+      const h=[...this.hand.get(p)];
+      if(h.length&&Math.random()<0.35){const c=pick(h);this.play(p,c,c==='halve'?pick(this.players.filter(x=>x!==p)).id:undefined);}else this.play(p,'none');
+    }
   }
   play(p,card,target){
     if(this.phase!=='cards'||this.plays.has(p)||!this.total.has(p))return;
@@ -604,6 +636,10 @@ function onMsg(conn,m,t){
     if(!r){conn.send({t:'err',msg:'No room with that code.'});return;}
     if(r.players.length>=MAX_PLAYERS){conn.send({t:'err',msg:'That room is full.'});return;}
     addPlayer(conn,r,m);
+  }else if(m.t==='solo'){
+    if(p)return;if(rooms.size>=500){conn.send({t:'err',msg:'The server is full. Try again later.'});return;}
+    const r={code:newCode(),players:[],host:null,game:null,party:null,solo:true};rooms.set(r.code,r);addPlayer(conn,r,m);
+    for(let i=0;i<3;i++)addBot(r);roomState(r);
   }else if(m.t==='match'){
     if(p||(m.mode!=='quick'&&m.mode!=='party'))return;
     if(rooms.size>=500){conn.send({t:'err',msg:'The server is full. Try again later.'});return;}
@@ -615,9 +651,11 @@ function onMsg(conn,m,t){
   else if(m.t==='start'){
     const r=p.room,G=Object.prototype.hasOwnProperty.call(GAMES,m.game)?GAMES[m.game]:null;
     if(!G||r.pub||r.host!==p||r.game||r.party||r.players.length<G.min)return;
+    if(r.solo)setBots(r,m.lv);
     r.game=new G.c(r,m.game);roomState(r);r.game.start();
   }else if(m.t==='party'){
     const r=p.room;if(r.pub||r.host!==p||r.game||r.party||(m.rounds!==5&&m.rounds!==10))return;
+    if(r.solo)setBots(r,m.lv);
     r.party=new Party(r,m.rounds);roomState(r);
   }else if(m.t==='cards'){if(p.room.party)p.room.party.pick(p,m.pick);}
   else if(m.t==='play'){if(p.room.party&&typeof m.card==='string')p.room.party.play(p,m.card,m.target);}
@@ -629,4 +667,4 @@ function onMsg(conn,m,t){
   }else if(m.t==='leave'){leave(conn);conn.send({t:'left'});}
 }
 
-server.listen(PORT,()=>console.log('Wobble Arena Online is running. Open http://localhost:'+PORT+' in your browser.'));
+server.listen(PORT,()=>console.log('Quick Six is running. Open http://localhost:'+PORT+' in your browser.'));

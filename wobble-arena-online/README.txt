@@ -1,5 +1,5 @@
-WOBBLE ARENA ONLINE
-===================
+QUICK SIX
+=========
 Keyboard reaction games for 2 to 6 friends, played in a web browser.
 
 WHAT IS IN THIS FOLDER
@@ -25,6 +25,17 @@ PLAYING WITH FRIENDS
   that can run Node.js apps). Upload this whole folder, set the start
   command to  node server.js , and share the web address the host gives you.
   The server reads the PORT setting that hosts provide automatically.
+
+SOLO VS BOTS
+  "Solo vs bots" on the first screen puts you against three computer players
+  in any of the 14 games, or in a full Party.
+  Each game has its own bot level, saved in your browser. Finish first and
+  that game's bots go up a level (faster reactions, fewer mistakes, quicker
+  mashing). Finish last and they drop one. There is no top level.
+
+YOUR CHARACTER
+  "Edit character" on the first screen lets you choose skin, hair style,
+  hair colour, eyes and shirt. It is saved in your browser.
 
 PLAYING STRANGERS
   Quick Match   joins a public room of up to 6. A random game starts

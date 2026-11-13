@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Wobble Arena Online</title>
+<title>Quick Six</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 html,body{margin:0;height:100%;background:#0b1630;overflow:hidden;font-family:"Trebuchet MS","Segoe UI",Arial,sans-serif;color:#1d2a55;user-select:none}
@@ -86,6 +86,7 @@ input.code{width:130px;text-transform:uppercase;letter-spacing:6px}
 .rrow i{font-style:normal;font-size:18px;margin-left:14px}
 .screen.bottom.wait .rowb{pointer-events:auto;margin-bottom:6px}
 .screen.bottom.wait .btn{position:static;font-size:17px;padding:7px 14px}
+.btn.gbtn small{font-size:12px;color:#1c7fd0;font-weight:800}
 </style>
 </head>
 <body>
@@ -337,6 +338,13 @@ const TIERS=[[0,'Rookie','#7d8798'],[950,'Amateur','#1f9a58'],[1100,'Semi-Pro','
 function tier(r){let t=TIERS[0];for(const x of TIERS)if(r>=x[0])t=x;return t;}
 let ws=null,room=null,myId=null,view='home',G=null,roomAt=0,EM={},overTimer=null;
 const PR={st:'idle',t:0,ms:null,best:null};
+/* solo: the bots' level for each game, kept in this browser. Win and they level up. */
+const SOLO_KEY='wobbleOnline.solo';let soloLv={};try{soloLv=JSON.parse(localStorage.getItem(SOLO_KEY)||'{}')||{};}catch(e){}
+function lvOf(k){return Math.max(1,soloLv[k]|0||1);}
+function soloResult(k,place,n){
+  const old=lvOf(k),nw=place===0?old+1:place>=n-1?Math.max(1,old-1):old;soloLv[k]=nw;try{localStorage.setItem(SOLO_KEY,JSON.stringify(soloLv));}catch(e){}
+  return place===0?'You won! The bots are now Level '+nw+'.':nw<old?'Last place. The bots drop to Level '+nw+'.':'Finish first to make the bots level up (Level '+old+').';
+}
 const STRIKER={name:'Striker',skin:SKINS[3],hairC:HAIRC[0],hair:0,eyes:2,shirt:'#e63946'};
 function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));}
 function connect(first){
@@ -374,19 +382,31 @@ function setUI(html,acts){
 function grabName(){const el=document.getElementById('pname');if(el)meInfo.name=el.value.trim().slice(0,12);saveMe();return meInfo.name||'Player';}
 function showHome(err){
   view='home';G=null;Music.play('menu');
-  setUI('<div class="screen"><div class="logo sm">WOBBLE <span>ARENA</span></div><p class="sub">14 quick-fire games and a Party Mode for up to 6 players. Keyboard only.</p>'+
-    '<div class="creator"><div class="col"><img id="look" src="'+avatarImg(meInfo.av,150,205)+'"><button class="btn sm" data-act="look">Change look</button></div>'+
+  setUI('<div class="screen"><div class="logo sm">QUICK <span>SIX</span></div><p class="sub">14 quick-fire games and a Party Mode for up to 6 players. Keyboard only.</p>'+
+    '<div class="creator"><div class="col"><img id="look" src="'+avatarImg(meInfo.av,150,205)+'"><button class="btn sm" data-act="look">Edit character</button></div>'+
     '<div class="col"><input class="name" id="pname" maxlength="12" placeholder="Your name" value="'+esc(meInfo.name)+'">'+
     '<div class="rowb"><button class="btn gold" data-act="quick">⚡ Quick Match</button><button class="btn gold" data-act="pmatch">🎉 Party Match</button></div>'+
     '<p class="sub small">Play strangers online. Your rank: <b style="color:'+tier(card.r)[2]+'">'+tier(card.r)[1]+' · '+card.r+'</b>'+(card.g?' ('+card.w+(card.w===1?' win':' wins')+' in '+card.g+' games)':'')+'</p>'+
-    '<button class="btn" data-act="create">Create a private room</button>'+
+    '<div class="rowb"><button class="btn" data-act="solo">🤖 Solo vs bots</button><button class="btn" data-act="create">Private room</button></div>'+
     '<div class="rowb"><input class="name code" id="code" maxlength="4" placeholder="CODE"><button class="btn" data-act="join">Join</button></div></div></div>'+
     (err?'<p class="warn">'+esc(err)+'</p>':'<p class="sub small">Private rooms: send the four-letter code to your friends.</p>')+'</div>',
-    {look:()=>{grabName();meInfo.av=randomLook();saveMe();showHome();},
+    {look:()=>{grabName();showCreator();},
      create:()=>{const n=grabName();connect({t:'create',name:n,av:meInfo.av});},
+     solo:()=>{const n=grabName();connect({t:'solo',name:n,av:meInfo.av});},
      quick:()=>{const n=grabName();connect({t:'match',mode:'quick',name:n,av:meInfo.av});},
      pmatch:()=>{const n=grabName();connect({t:'match',mode:'party',name:n,av:meInfo.av});},
      join:()=>{const n=grabName(),c=(document.getElementById('code').value||'').toUpperCase().trim();if(c.length!==4){showHome('Type the four-letter room code first.');return;}connect({t:'join',code:c,name:n,av:meInfo.av});}});
+}
+function showCreator(){
+  view='home';const d=meInfo.av;
+  const row=(label,k)=>{const idx=(k==='hair'||k==='eyes'),val=idx?OPTS[k][d[k]]:'<i style="background:'+d[k]+'"></i>';
+    return '<div class="crow"><span>'+label+'</span><button class="btn sm" data-act="chg" data-k="'+k+'" data-d="-1">&#9664;</button><em>'+val+'</em><button class="btn sm" data-act="chg" data-k="'+k+'" data-d="1">&#9654;</button></div>';};
+  setUI('<div class="screen"><h2>Your character</h2><div class="creator"><img src="'+avatarImg(d,240,330)+'"><div class="col">'+row('Skin','skin')+row('Hair style','hair')+row('Hair colour','hairC')+row('Eyes','eyes')+row('Shirt','shirt')+'</div></div>'+
+    '<div class="rowb"><button class="btn sm" data-act="rnd">Surprise me</button><button class="btn gold" data-act="ok">Done</button></div></div>',
+    {chg:el=>{const k=el.dataset.k,arr=OPTS[k],dir=+el.dataset.d;
+       if(k==='hair'||k==='eyes')d[k]=((d[k]|0)+dir+arr.length)%arr.length;else{const j=Math.max(0,arr.indexOf(d[k]));d[k]=arr[(j+dir+arr.length)%arr.length];}
+       saveMe();showCreator();},
+     rnd:()=>{meInfo.av=randomLook();saveMe();showCreator();},ok:()=>showHome()});
 }
 const GAME_INFO=[
   ['draw','🤠','Quick Draw','Press SPACE the instant you see DRAW!',1],
@@ -409,13 +429,13 @@ function showLobby(){
   if(room.pub)return showWait();
   view='lobby';G=null;Music.play('menu');
   const host=room.host===myId,hn=who(room.host).name;
-  const cards=room.players.map(p=>'<div class="pcard'+(p.id===myId?' me':'')+'"><img src="'+avatarImg(p.av,74,100)+'"><b>'+esc(p.name)+'</b><span>'+(p.id===room.host?'👑 host':'&nbsp;')+'</span><small>'+p.wins+' win'+(p.wins===1?'':'s')+(p.ping!=null?' · '+p.ping+' ms':'')+'</small></div>').join('');
-  const games=GAME_INFO.filter(x=>x[4]<=room.players.length).map(x=>'<button class="btn gbtn" data-act="g" data-g="'+x[0]+'" title="'+esc(x[3])+'"><span>'+x[1]+'</span>'+x[2]+'</button>').join('');
-  setUI('<div class="screen"><div class="codebig"><small>Room code</small> '+esc(room.code)+'</div><p class="sub small">Friends open this same web address and type the code to join.</p>'+
+  const cards=room.players.map(p=>'<div class="pcard'+(p.id===myId?' me':'')+'"><img src="'+avatarImg(p.av,74,100)+'"><b>'+esc(p.name)+'</b><span>'+(p.bot?'🤖 bot':p.id===room.host&&!room.solo?'👑 host':'&nbsp;')+'</span><small>'+p.wins+' win'+(p.wins===1?'':'s')+(p.ping!=null?' · '+p.ping+' ms':'')+'</small></div>').join('');
+  const games=GAME_INFO.filter(x=>x[4]<=room.players.length).map(x=>'<button class="btn gbtn" data-act="g" data-g="'+x[0]+'" title="'+esc(x[3])+'"><span>'+x[1]+'</span>'+x[2]+(room.solo?'<small>bots Lv '+lvOf(x[0])+'</small>':'')+'</button>').join('');
+  setUI('<div class="screen">'+(room.solo?'<h2>Solo vs bots</h2><p class="sub small">Win a game and its bots level up: faster reactions, fewer mistakes. There is no top level.</p>':'<div class="codebig"><small>Room code</small> '+esc(room.code)+'</div><p class="sub small">Friends open this same web address and type the code to join.</p>')+
     '<div class="grid">'+cards+'</div>'+
-    (room.playing?'<p class="sub">A game is in progress. You will join the next one.</p>':host?'<div class="rowb"><button class="btn gold" data-act="party" data-r="5">🎉 Party Mode: 5 rounds</button><button class="btn gold" data-act="party" data-r="10">🎉 Party Mode: 10 rounds</button></div><p class="sub small">or play a single game'+(room.players.length<2?' (you can practise alone while you wait)':'')+':</p><div class="grid tight">'+games+'</div>':'<p class="sub">Waiting for '+esc(hn)+' to start a party or pick a game...</p>')+
-    '<div class="rowb"><button class="btn sm" data-act="snd">'+('Sound: '+(state.settings.sound?'on':'off'))+'</button><button class="btn sm" data-act="leave">Leave room</button></div></div>',
-    {g:el=>send({t:'start',game:el.dataset.g}),party:el=>send({t:'party',rounds:+el.dataset.r}),snd:()=>{Snd.setOn(!state.settings.sound);showLobby();},leave:()=>send({t:'leave'})});
+    (room.playing?'<p class="sub">A game is in progress. You will join the next one.</p>':host?'<div class="rowb"><button class="btn gold" data-act="party" data-r="5">🎉 Party Mode: 5 rounds</button><button class="btn gold" data-act="party" data-r="10">🎉 Party Mode: 10 rounds</button></div><p class="sub small">'+(room.solo?'Party bots are Level '+lvOf('party')+'. Or play a single game':'or play a single game')+(room.players.length<2?' (you can practise alone while you wait)':'')+':</p><div class="grid tight">'+games+'</div>':'<p class="sub">Waiting for '+esc(hn)+' to start a party or pick a game...</p>')+
+    '<div class="rowb"><button class="btn sm" data-act="snd">'+('Sound: '+(state.settings.sound?'on':'off'))+'</button><button class="btn sm" data-act="leave">'+(room.solo?'Back to menu':'Leave room')+'</button></div></div>',
+    {g:el=>send({t:'start',game:el.dataset.g,lv:lvOf(el.dataset.g)}),party:el=>send({t:'party',rounds:+el.dataset.r,lv:lvOf('party')}),snd:()=>{Snd.setOn(!state.settings.sound);showLobby();},leave:()=>send({t:'leave'})});
 }
 function showOver(m){
   view='over';G=null;Music.stop();
@@ -423,7 +443,8 @@ function showOver(m){
   const title=(GAME_INFO.find(x=>x[0]===m.g)||[])[2]||'Game';
   const rt=m.rate||{};
   const rows=m.rank.map((r,i)=>{const p=who(r.id),d=rt[r.id];return '<div class="rrow'+(r.id===myId?' me':'')+'"><span class="pos">'+(['🥇','🥈','🥉'][i]||ORD[i])+'</span><img src="'+avatarImg(p.av,44,60)+'"><b>'+esc(p.name)+'</b><em>'+esc(r.note)+'</em>'+(d?'<i class="'+(d.d>=0?'up':'down')+'">'+(d.d>=0?'+':'')+d.d+' rank</i>':'')+'</div>';}).join('');
-  setUI('<div class="screen"><h2>'+title+' results</h2><div class="rlist">'+rows+'</div><button class="btn big" data-act="lobby">'+(room&&room.pub?'Back to the waiting room':'Back to the room')+'</button></div>',{lobby:()=>{showLobby();}});
+  const soloMsg=room&&room.solo?soloResult(m.g,m.rank.findIndex(r=>r.id===myId),m.rank.length):'';
+  setUI('<div class="screen"><h2>'+title+' results</h2><div class="rlist">'+rows+'</div>'+(soloMsg?'<p class="sub">'+soloMsg+'</p>':'')+'<button class="btn big" data-act="lobby">'+(room&&room.pub?'Back to the waiting room':'Back to the room')+'</button></div>',{lobby:()=>{showLobby();}});
   Music.play('menu',2.6);
   clearTimeout(overTimer);if(room&&room.pub)overTimer=setTimeout(()=>{if(view==='over')showLobby();},9000);
 }
@@ -833,7 +854,7 @@ function onParty(m){
   else if(m.ev==='locked'){if(PV&&PV.phase==='cards'){PV.locked[m.id]=1;showCards();}}
   else if(m.ev==='game'){ui.innerHTML='';}
   else if(m.ev==='reveal'){view='party';G=null;ui.innerHTML='';const prev={};m.rows.forEach(r=>prev[r.id]=r.total-r.pts);PV={phase:'reveal',t:0,n:m.n,of:m.of,rows:m.rows,prev:prev,last:m.last,step:0};Music.stop();Snd.sfx('mid');}
-  else if(m.ev==='final'){view='party';G=null;PV={phase:'final',t:0,order:m.order,rate:m.rate||{}};Snd.sfx('champ');
+  else if(m.ev==='final'){view='party';G=null;PV={phase:'final',t:0,order:m.order,rate:m.rate||{},solo:room&&room.solo?soloResult('party',m.order.findIndex(o=>o.id===myId),m.order.length):''};Snd.sfx('champ');
     setUI('<div class="screen bottom"><button class="btn big" data-act="lobby">'+(room&&room.pub?'Waiting room':'Back to the room')+'</button></div>',{lobby:()=>{PV=null;showLobby();}});Music.play('menu',3.2);
     clearTimeout(overTimer);if(room&&room.pub)overTimer=setTimeout(()=>{if(view==='party'&&PV&&PV.phase==='final'){PV=null;showLobby();}},14000);}
 }
@@ -893,7 +914,7 @@ function drawParty(g,dt){
       lines.forEach((l,j)=>txt(g,l[0],x,y-38-j*26,20,l[1]));
     }
   });
-  if(fin){const w=PV.order[0];txt(g,(w.id===myId?'YOU WIN':who(w.id).name.toUpperCase()+' WINS')+' THE PARTY!',540,60,54,'#ffd23f');
+  if(fin){const w=PV.order[0];txt(g,(w.id===myId?'YOU WIN':who(w.id).name.toUpperCase()+' WINS')+' THE PARTY!',540,60,54,'#ffd23f');if(PV.solo)txt(g,PV.solo,540,112,24,'#fff');
     for(let i=0;i<60;i++){g.fillStyle=CROWD[i%CROWD.length];g.fillRect((i*211)%W,((t*140+i*97)%760)-20,10,16);}}
   else txt(g,'Round '+PV.n+' of '+PV.of+(t<3.2?'  ·  results':t<6.2?'  ·  cards revealed!':'  ·  podiums rising')+(PV.last?'  (final round)':''),W/2,50,34,'#fff');
 }
